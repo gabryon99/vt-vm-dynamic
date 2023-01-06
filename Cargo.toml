@@ -1,0 +1,16 @@
+[package]
+name = "vt-vm-dyn"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+caches = "0.2.3"
+log = "0.4.17"
+env_logger = "0.6.1"
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm13-0"] }
+
+
+[build-dependencies]
+cc = { version = "1.0", features = ["parallel"] }
