@@ -10,9 +10,9 @@ pub struct Memory {
     data: [u8; MEMORY_SIZE], // Reserve 64KB for programs
 }
 
-impl Memory {
-    pub fn new() -> Self {
-        Memory {
+impl Default for Memory {
+    fn default() -> Self {
+        Self {
             data: [0; MEMORY_SIZE],
         }
     }
