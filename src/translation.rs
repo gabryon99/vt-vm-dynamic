@@ -32,7 +32,12 @@ impl<'ctx> TranslationBlock<'ctx> {
 }
 
 extern "C" fn debug_cpu_state(cpu: &Cpu) {
-    log::warn!("[LLVM] :: PC: {:#04x}, ACC: {:#4}, LC: {:#4}", cpu.pc, cpu.acc, cpu.lc);
+    log::warn!(
+        "[LLVM] :: PC: {:#04x}, ACC: {:#4}, LC: {:#4}",
+        cpu.pc,
+        cpu.acc,
+        cpu.lc
+    );
 }
 
 struct FunctionContext<'ctx> {
@@ -45,7 +50,9 @@ struct FunctionContext<'ctx> {
     halt_ptr: PointerValue<'ctx>,
 }
 
-pub struct TranslatorEngine<'ctx> {
+pub struct TranslationContext<'ctx> {
+    pub executions: u64,
+    bytecode: Vec<OpCode>,
     module: Module<'ctx>,
     builder: Builder<'ctx>,
     execution_engine: ExecutionEngine<'ctx>,
@@ -53,15 +60,16 @@ pub struct TranslatorEngine<'ctx> {
     translation_block: RefCell<Option<TranslationBlock<'ctx>>>,
 }
 
-impl<'ctx> TranslatorEngine<'ctx> {
-
-    pub fn new(context: &'ctx Context) -> Self {
-        let module = context.create_module("translator_engine");
+impl<'ctx> TranslationContext<'ctx> {
+    pub fn new(context: &'ctx Context, bytecode: Vec<OpCode>) -> Self {
+        let module = context.create_module("mod");
         let execution_engine = module
             .create_jit_execution_engine(OptimizationLevel::Default)
             .unwrap();
         let builder = context.create_builder();
         Self {
+            executions: 0,
+            bytecode,
             module,
             execution_engine,
             builder,
@@ -70,15 +78,19 @@ impl<'ctx> TranslatorEngine<'ctx> {
         }
     }
 
+    pub fn has_compiled(&self) -> bool {
+        self.translation_block.borrow().is_some()
+    }
+
     pub fn execute(&self, cpu: &mut Cpu) {
         let tb = self.translation_block.borrow();
         tb.as_ref().unwrap().execute(cpu);
     }
 
-    pub fn compile_dynamic_basic_block(&self, dbb: Vec<OpCode>) -> Result<(), String> {
+    pub fn compile_dynamic_basic_block(&self) -> Result<(), String> {
         self.setup_prologue();
 
-        dbb.iter().for_each(|instr| match instr {
+        self.bytecode.iter().for_each(|instr| match instr {
             OpCode::HALT => self.halt(),
             OpCode::CLRA => self.clra(),
             OpCode::INC3A => self.inc3a(),
@@ -93,31 +105,21 @@ impl<'ctx> TranslatorEngine<'ctx> {
         // self.module.print_to_stderr();
 
         // Verify the module's correctness before executing it.
-        
-        match self.module.verify() {
-        Ok(_) => (),
-            Err(msg) => {
-                log::error!(
-                    "Error while verifying LLVM module: {}",
-                    msg.to_str().unwrap()
-                );
-                return Err("Unable to verify the correctness of the LLVM function".to_string())
-            }
-        }
+        self.module
+            .verify()
+            .map_err(|msg| format!("Function's verification failed: {}", msg.to_string()))?;
 
-        match self.jit_compile() {
-            Ok(fun) => {
-                // The function has been compiled successfully, increase the id generator
+        self.jit_compile()
+            .map(|compiled_fun| {
                 self.translation_block
-                    .replace(Some(TranslationBlock::new(fun)));
-                Ok(())
-            }
-            Err(err) => Err(format!(
-                "Something went wrong when compiling the dynamic basic block: {}",
-                err.to_string()
-            )
-            .to_string()),
-        }
+                    .replace(Some(TranslationBlock::new(compiled_fun)));
+            })
+            .map_err(|err| {
+                format!(
+                    "Something went wrong when compiling the dynamic basic block: {}",
+                    err
+                )
+            })
     }
 
     fn jit_compile(&self) -> Result<JitFunction<'ctx, CompiledFunc>, FunctionLookupError> {
